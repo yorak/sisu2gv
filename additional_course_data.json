@@ -1,0 +1,42 @@
+
+{
+    "course_icons" : {
+        "COMP_CS_140":"🕑💻👥",
+        "COMP_CS_320":"💻?",
+        "COMP_CS_500":"🕑💻👥",
+        "COMP_SE_110":"📚?", 
+        "COMP_SE_121":"📚👥?", 
+        "COMP_SE_200":"💻👥?", 
+        "COMP_SE_620":"💻👥💡", 
+        "COMP_CE_450":"💻🧪?", 
+        "COMP_CS_130":"💻", 
+        "COMP_CS_400":"📚💻?", 
+        "COMP_CS_510":"?", 
+        "COMP_SE_140":"📚👥?", 
+        "COMP_SE_210":"📚?", 
+        "COMP_SEC_100":"📚✓?",
+        "COMP_SEC_110":"📚🕑?",
+        "DATA_DB_200":"?",
+        "DATA_DB_300":"💻?",
+        "DATA_ML_100":"💻🕑📚",
+        "DATA_ML_360":"📚👥?",
+        "DATA_ML_370":"?",
+        "DATA_ML_381":"📚🕑👥?",
+        "HTI_110":"📚👥?"
+    },
+
+    "manual_prerequisites" : [
+    {"COMP_CS_100":"DATA_ML_100"},
+    {"COMP_CS_110":"DATA_ML_100"},
+    {"MATH_MA_140":"DATA_ML_100"},
+
+    {"DATA_DB_100":"DATA_ML_360"},
+    {"DATA_ML_100":"DATA_ML_360"},
+    
+    {"COMP_CS_300":"COMP_CS_320"},
+    {"DATA_DB_100":"COMP_CS_320"},
+    {"DATA_ML_100":"COMP_CS_360"},
+    {"DATA_DB_100":"COMP_CS_360"},
+
+    {"MATH_APP_270":"MATH_APP_260"}]
+}

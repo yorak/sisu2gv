@@ -1,0 +1,15 @@
+# Editor agnostic
+.vscode
+
+*.pyo
+*.pyc
+
+# Outputs
+*.png
+*.svg
+*.gv
+
+# Sisu json data cache
+cache/*
+
+
