@@ -426,7 +426,7 @@ if __name__=="__main__":
         args.degree_programme,
         curriculum,
         args.outputfile,
+        args.also_recommended,
         args.blacklist,
         extra_data
     )
-   
