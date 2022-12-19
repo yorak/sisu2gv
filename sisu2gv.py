@@ -14,13 +14,17 @@ __license__ = "MIT"
 
 import requests
 import json
+import logging
 import textwrap
+
 from pprint import pprint
 from os import path
 from datetime import date
 
 # Global datastructure to store and map course id/code to course data
 cid2c = {}
+# Global datastructure to store prerequisites for processing
+queued_prerequisites = []
 cache_dir = "./cache/"
 
 SISU_PROG_URL = 'https://sis-tuni.funidata.fi/kori/api/modules/'
@@ -35,21 +39,28 @@ def get_cached(id):
     return None
 
 def store_to_cache(this_data, with_id):
-    full_path = path.join(cache_dir, id+'.json')
+    full_path = path.join(cache_dir, with_id+'.json')
     with open(full_path, "w", encoding='utf-8') as wf:
         jsonstr = json.dumps(this_data, indent=2)
         wf.write(jsonstr)
 
-def validate_and_clean_preprequisites(reqs, curriculum):
-    to_rm = []
-    for rq in reqs:
-        if parse_course(rq, curriculum) is None:
-            to_rm.append(rq)
-    for rmid in to_rm:
-        reqs.remove(rmid)
+def queue_validate_and_clean_preprequisites(reqs):
+    global queued_prerequisites
+    queued_prerequisites.append( reqs )
 
-def parse_course(cid, curriculum):
+def validate_and_clean_queued_preprequisites(curriculum):
+    global queued_prerequisites
+    for reqs in queued_prerequisites:
+        to_rm = []
+        for rq in reqs:
+            if parse_course(rq, curriculum, in_main_tree=False) is None:
+                to_rm.append(rq)
+        for rmid in to_rm:
+            reqs.remove(rmid)
+
+def parse_course(cid, curriculum, in_main_tree=True):
     global cid2c
+
     c_data = get_cached(cid)
     if not c_data:
         params = {
@@ -57,11 +68,18 @@ def parse_course(cid, curriculum):
             'universityId':'tuni-university-root-id'
         }
         resp = requests.get(url=SISU_COURSE_URL, params=params)
+        logging.info("Hit SISU endpoint :"+resp.url)
+        if (resp.status_code!=200):
+            logging.warning(f"Got HTTP status code {resp.status_code} when getting course with ID {cid}, skipping it.")
+            return None
+        
         c_data = resp.json()
         store_to_cache(c_data, cid)
     
     for c in c_data:
-        if not curriculum in c['curriculumPeriodIds']:
+        valid_for_curriculums = c['curriculumPeriodIds'] 
+        # can be empty? assume it is valid if no years is set
+        if valid_for_curriculums and not curriculum in valid_for_curriculums:
             continue
 
         code = c['code']
@@ -74,7 +92,7 @@ def parse_course(cid, curriculum):
         for prs in c['recommendedFormalPrerequisites']:
             for pr in prs['prerequisites']:
                 if pr['type']!='CourseUnit':
-                    print("WARNING: Skipping non-course prerequisite")
+                    logging.warning("Skipping non-course prerequisite")
                     continue
                 if pr['courseUnitGroupId'] not in rprqs:
                     rprqs.append(pr['courseUnitGroupId'])
@@ -83,12 +101,18 @@ def parse_course(cid, curriculum):
         for prs in c['compulsoryFormalPrerequisites']:
             for pr in prs['prerequisites']:
                 if pr['type']!='CourseUnit':
-                    print("WARNING: Skipping non-course prerequisite")
+                    logging.warning("Skipping non-course prerequisite")
                     continue
                 if pr['courseUnitGroupId'] not in rprqs:
                     cprqs.append(pr['courseUnitGroupId'])
 
         course = {'code':code, 'name':name, 'rec_prqs':rprqs, 'com_prqs':cprqs}
+
+        course['key'] = c['code'].replace(".", "_")
+        # Sometimes the course may be in alternative module groups. Create a new key!
+        #  TODO: What if it is in 3 groups?
+        if in_main_tree and cid in cid2c:
+            course['key']+="_alt"
         cid2c[cid] = course
         return course
     return None
@@ -102,11 +126,18 @@ def parse_module_group(gid, curriculum):
             'universityId':'tuni-university-root-id'
         }
         resp = requests.get(url=SISU_GROUP_URL, params=params)
+        logging.info("Hit SISU endpoint :"+resp.url)
+        if (resp.status_code!=200):
+            logging.warning(f"Got HTTP status code {resp.status_code} when getting degree module ID {gid}, skipping it.")
+            return None
+
         sm_data = resp.json()
         store_to_cache(sm_data, gid)
     
     for alt_grouping in sm_data:
-        if not curriculum in alt_grouping['curriculumPeriodIds']:
+        valid_for_curriculums = alt_grouping['curriculumPeriodIds'] 
+        # can be empty? assume it is valid if no years is set
+        if valid_for_curriculums and not curriculum in valid_for_curriculums:
             continue
 
         name = alt_grouping['name']['fi']
@@ -123,7 +154,7 @@ def parse_rules(rd, curriculum):
     """ Recursively parses rules, modules, and courses in the Sisu data. """
     type = rd['type']
     if type=='CreditsRule': 
-        # ignore credits info for now
+        # ignore credits info for now, just recurese into child
         return parse_rules(rd['rule'], curriculum)
     elif type=='CompositeRule':
         children = []
@@ -136,9 +167,10 @@ def parse_rules(rd, curriculum):
             elif 'courseUnitGroupId' in rule:
                 cid = rule['courseUnitGroupId']
                 course = parse_course(cid, curriculum)
-                validate_and_clean_preprequisites(course['rec_prqs'], curriculum)
-                validate_and_clean_preprequisites(course['com_prqs'], curriculum)
-                children.append(course)
+                if course is not None:
+                    queue_validate_and_clean_preprequisites(course['rec_prqs'])
+                    queue_validate_and_clean_preprequisites(course['com_prqs'])
+                    children.append(course)
             else:
                 name = ''
                 type = 'grouping'
@@ -157,8 +189,10 @@ def parse_rules(rd, curriculum):
     elif type=='CourseUnitRule':
         cid = rule['courseUnitGroupId']
         course = parse_course(cid, curriculum)
-        validate_and_clean_preprequisites(course['rec_prqs'], curriculum)
-        validate_and_clean_preprequisites(course['com_prqs'], curriculum)
+        if course is None:
+            return None
+        queue_validate_and_clean_preprequisites(course['rec_prqs'])
+        queue_validate_and_clean_preprequisites(course['com_prqs'])
         return course 
     else:
         print("WARNING: unknown type ", type)
@@ -172,7 +206,7 @@ def compress(hierarchy):
         if 'children' in g and len(g['children'])==1:
             only_child = g['children'][0]
             if 'children' in only_child:
-                only_child['name'] = g['name']+"/"+only_child['name']
+                #only_child['name'] = g['name']+"/"+only_child['name']
                 replacements.append( (g, only_child) )
     for this, that in replacements:
         ti = hierarchy.index(this)
@@ -181,6 +215,7 @@ def compress(hierarchy):
 def draw_graph_for_degree_programme(
   pgid, curriculum, 
   output_gv_file_path=None,
+  also_recommended=True,
   course_blacklist=[],
   extra_data={}):
 
@@ -196,6 +231,7 @@ def draw_graph_for_degree_programme(
     :param str gpid: The degree program id as an otm code.
     :param str curriculum: The curriculum code to use (e.g. "uta-lvv-2022").
     :param str output_gv_file_path: The file name to produce the graphviz graph definition.
+    :param bool also_recommended: Also draw recommended courses.
     :param list course_blacklist: list of course codes/labels not to add to the graph.
     :param dict extra_data: Extra data such as course icons and manual prerequisites. Read the code.
      """
@@ -208,6 +244,11 @@ def draw_graph_for_degree_programme(
     p_data = get_cached(pgid)
     if not p_data:
         resp = requests.get(url=SISU_PROG_URL+pgid)
+        logging.info("Hit SISU endpoint :"+resp.url)
+        if (resp.status_code!=200):
+            logging.warning(f"Got HTTP status code {resp.status_code} when getting degree programme ID {pgid}, skipping it.")
+            return None
+
         p_data = resp.json()
         store_to_cache(p_data, pgid)
 
@@ -219,6 +260,8 @@ def draw_graph_for_degree_programme(
         smg =  parse_module_group(gid, curriculum)
         if smg:
             module_hierarchy.append(smg)
+    # Process the prerequisites now that we know all the ids
+    validate_and_clean_queued_preprequisites(curriculum)
 
     # This removes/shrinks/combines unnecessary rules for visualization such as
     #  credit rules, groupings etc.
@@ -245,20 +288,27 @@ def draw_graph_for_degree_programme(
             # Closure for these
             nonlocal indent, all_com_prqs, all_rec_prqs
 
-            ck1 = c['code'].replace('.','_')
-            wrapname = textwrap.fill(c['name'], 20, max_lines=3, placeholder="...").replace('\n',r'\n')
-            icon =  extra_data['course_icons'][ck1] if extra_data and ck1 in extra_data['course_icons'] else ''
-            wf.write(indent*"  "+f"{ck1} [shape=record, label=\"{c['code']} {icon}|{wrapname}\"];\n")
+            ck1 = c['key']
+            cc1 = c['code']
+            wrapname = textwrap.fill(c['name'], 20, max_lines=3, placeholder="...").replace('\n',r'<BR/>')
+            icon =  ' '+extra_data['course_icons'][ck1] if extra_data and ck1 in extra_data['course_icons'] else ''
+            #wf.write(indent*"  "+f"{ck1} [shape=record, label=\"{c['code']} {icon}|{wrapname}\"];\n")
+            wf.write(indent*"  "+f"{ck1} [shape=plaintext, label=<\n"+
+            
+            (indent+1)*"  "+""" <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">\n"""+ 
+            (indent+2)*"  "+f"<TR><TD>{cc1+icon}</TD></TR>\n"+
+            (indent+2)*"  "+f"<TR><TD>{wrapname}</TD></TR>\n"+
+            (indent+1)*"  "+"</TABLE> > ];\n")
 
             for pr in c['com_prqs']:
                 if pr in cid2c:
                     c2 = cid2c[pr]
-                    ck2 = c2['code'].replace('.','_')
+                    ck2 = c2['key']
                     all_com_prqs.append((ck2, ck1))
             for pr in c['rec_prqs']:
                 if pr in cid2c:
                     c2 = cid2c[pr]
-                    ck2 = c2['code'].replace('.','_')
+                    ck2 = c2['key']
                     all_rec_prqs.append((ck2, ck1))
         
         def write_cluster(sg, blacklist):
@@ -274,11 +324,10 @@ def draw_graph_for_degree_programme(
                 if 'children' in c:
                     write_cluster(c, blacklist)
                 else:
-                    ck = c['code'].replace('.', '_')
-                    if ck in blacklist:
+                    if c['key'] in blacklist:
                         continue
                     write_course(c)
-                    in_clusters.append(c['code'])
+                    in_clusters.append(c['key'])
 
             indent-=1
             wf.write(indent*"  "+"}\n")
@@ -296,23 +345,34 @@ def draw_graph_for_degree_programme(
         for sg in module_hierarchy:
             write_cluster(sg, course_blacklist)
 
+        active_prqs = []
         write_prerequisites(all_com_prqs, course_blacklist, style="")
-        write_prerequisites(all_rec_prqs, course_blacklist, style="dashed")
+        active_prqs+=[prq for prq, c in all_com_prqs]
+        if also_recommended:
+            write_prerequisites(all_rec_prqs, course_blacklist, style="dashed")
+            active_prqs+=[prq for prq, c in all_rec_prqs]
         if extra_data and extra_data['manual_prerequisites']:
             # it is a list of dicts
             man_prqs = []
             for d in extra_data['manual_prerequisites']:
                 man_prqs+=list(d.items())
             write_prerequisites(man_prqs, course_blacklist, style="dotted")
+            active_prqs+=[prq for prq, c in man_prqs]
 
         loose_courses = []
         wf.write("{ rank=source; ")
         for c in cid2c.values():
             cc = c['code']
-            ck = c['code'].replace('.', '_')
-            if cc in in_clusters or ck in course_blacklist:
+            ck = c['key']
+
+            # Might already have a node,
+            # might be blacklisted
+            # might not be added
+            if cc in in_clusters or \
+               ck in course_blacklist or \
+               ck not in active_prqs:
                 continue
-            ck = cc.replace('.','_')
+
             wf.write(f"{ck}; ")
             loose_courses.append(c)
         wf.write("}\n")
@@ -337,10 +397,21 @@ if __name__=="__main__":
     parser.add_argument("-b", "--blacklist", action="append", help="Blacklist "+
       "these course codes from the graph. The parameter can be give multiple "+
       "times to blacklist multiple courses")
+    parser.add_argument("-a", "--also_recommended", action='store_true', help = "Also show recommended course prerequisites.")
     parser.add_argument("-e", "--extradata", default=None,
                         help=".json file with some additional data (see readme)")
+    parser.add_argument("-v", "--verbose", dest="verbosity", action="count", default=0,
+                    help="Set verbosity level (default shows warnings, show also info = -v, also debug = -vv")
+    
     args = parser.parse_args()
-
+    
+    log_levels = {
+        0: logging.WARN,
+        1: logging.INFO,
+        2: logging.DEBUG,
+    }
+    logging.basicConfig(level=log_levels[min(args.verbosity,max(log_levels.keys()))])
+    
     if args.cachedir:
         cache_dir = args.cachedir
 
@@ -350,6 +421,7 @@ if __name__=="__main__":
             extra_data = json.load(rf)
     
     curriculum = "uta-lvv-%d"%args.year
+    
     draw_graph_for_degree_programme(
         args.degree_programme,
         curriculum,

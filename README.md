@@ -12,16 +12,18 @@ can then be drawn to a graph visualization using Graphviz dot command.
 
 Just clone the repo and the script some commands. For example:
 
+<!-- FM Tietopohjaisten web-järjestelmien maisteriohjelma, Seinäjoki / Pori -->
 ```bash
-./sisu2gv.py otm-648015d7-c210-4f5e-b83a-e5a2fc8b6526 -y 2022 -b ITC_CEE_800 -b TAU_OPN_120 -b COMP_920 -b TAU_KN_111 -b TAU_KN_121 -b TAU_KN_131 -b TAU_KN_110 -b TAU_KN_120 -b AUT_410 -b AUT_420
+./sisu2gv.py otm-648015d7-c210-4f5e-b83a-e5a2fc8b6526 -y 2022 -b ITC_CEE_800 -b TAU_OPN_120 -b COMP_920 -b TAU_KN_111 -b TAU_KN_121 -b TAU_KN_131 -b TAU_KN_110 -b TAU_KN_120 -b AUT_410 -b AUT_420 -o DIFM_courses_2022_FM.gv
 ```
 
 Would generate a Graphviz file for the degree programme _"Tietojenkäsittelyopin maisteriohjelma, Seinäjoki, 120 op"_. Some courses related to MSc. thesis and some outliers are blacklisted.
 
 Another (very similar) example:
 
+<!-- DI  Tietopohjaisten web-järjestelmien DI-ohjelma, Seinäjoki / Pori -->
 ```bash
-./sisu2gv.py otm-648015d7-c210-4f5e-b83a-e5a2fc8b6526 -y 2022 -b ITC_CEE_800 -b TAU_OPN_120 -b COMP_920 -b TAU_KN_111 -b TAU_KN_121 -b TAU_KN_131 -b TAU_KN_110 -b TAU_KN_120 -b AUT_410 -b AUT_420
+./sisu2gv.py otm-4659314e-dd4d-4e46-a693-ef597d1e8fc6 -y 2022 -b ITC_CEE_800 -b TAU_OPN_120 -b COMP_920 -b TAU_KN_111 -b TAU_KN_121 -b TAU_KN_131 -b TAU_KN_110 -b TAU_KN_120 -b AUT_410 -b AUT_420 -o DIFM_courses_2022_DI.gv
 ```
 
 Would generate a Graphviz file for its sister programme _"Tietotekniikan DI-ohjelma, Seinäjoki, 120 op"_.
